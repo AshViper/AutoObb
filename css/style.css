@@ -1,0 +1,16 @@
+body { margin: 0; overflow: hidden; font-family: sans-serif; height: 100vh; display: flex; }
+#container { flex: 1; position: relative; background: #222; }
+#sidebar { width: 320px; background: #333; color: #eee; padding: 15px; display: flex; flex-direction: column; border-left: 1px solid #444; height: 100%; box-sizing: border-box; overflow-y: auto; }
+h2 { margin-top: 0; font-size: 1.2em; border-bottom: 2px solid #555; padding-bottom: 10px; }
+.control-group { margin-bottom: 15px; background: #444; padding: 10px; border-radius: 4px; }
+label { display: block; margin-bottom: 5px; font-size: 0.9em; color: #ccc; }
+input[type="number"], input[type="text"], textarea { width: 100%; box-sizing: border-box; background: #222; border: 1px solid #555; color: #fff; padding: 5px; margin-bottom: 5px; }
+input[type="range"] { width: 100%; box-sizing: border-box; }
+button { background: #007acc; color: white; border: none; padding: 8px 12px; border-radius: 3px; cursor: pointer; width: 100%; margin-top: 5px; font-weight: bold; }
+button:hover { background: #005a9e; }
+button.delete { background: #cc3300; }
+button.delete:hover { background: #992600; }
+textarea { height: 200px; font-family: monospace; font-size: 0.8em; white-space: pre; overflow-x: auto; }
+.row { display: flex; gap: 5px; }
+.row input { flex: 1; }
+#loading-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; color: white; z-index: 100; font-size: 1.5em; }
