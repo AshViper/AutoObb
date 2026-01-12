@@ -22,7 +22,7 @@ function init() {
             if(mesh) {
                 panel.style.display = 'block';
                 syncUIFromObb(mesh);
-                setSelection(mesh); // Ensure gizmo attached
+                setSelection(mesh); 
             } else {
                 panel.style.display = 'none';
                 setSelection(null);
@@ -32,6 +32,17 @@ function init() {
             updateJsonOutput();
         }
     );
+
+    // DEBUG: Test Cube
+    import('./viewer.js').then(m => {
+        const s = m.getScene();
+        if(s) {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), new THREE.MeshBasicMaterial({color:0xff0000, wireframe:true}));
+            mesh.position.set(0, 5, 0); 
+            s.add(mesh);
+            console.log("Debug Cube Added");
+        }
+    });
 
     // Initial binding
     bindEvents();
