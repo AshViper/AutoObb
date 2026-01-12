@@ -211,68 +211,94 @@
             reader.onload = function(e) {
                 try {
                     const json = JSON.parse(e.target.result);
-                    console.log("Loaded JSON:", json);
+                    console.log("Loaded JSON Structure:", Object.keys(json));
+                    if(json.data) console.log("json.data keys:", Object.keys(json.data));
                     
                     let geometry = null;
 
-                    // Strategy Pattern for loading
+                    // 1. Try Loading as Standard BufferGeometry
                     if (json.type === 'BufferGeometry' && json.data) {
-                        // Standard Three.js BufferGeometry export
-                        console.log("Detected Standard Three.js BufferGeometry");
-                        const loader = new THREE.BufferGeometryLoader();
-                        geometry = loader.parse(json);
+                        console.log("Attempting to load as BufferGeometry");
+                        try {
+                            const loader = new THREE.BufferGeometryLoader();
+                            geometry = loader.parse(json);
+                        } catch(err) { console.warn("BufferGeometryLoader failed", err); }
                     } 
-                    else if (json.attributes) {
-                        // Raw attributes object (sometimes passed directly)
-                        console.log("Detected Raw Attributes");
-                        const loader = new THREE.BufferGeometryLoader();
-                        geometry = loader.parse({ data: json });
+                    
+                    // 2. Try Loading as Raw Attributes (Direct Data)
+                    if (!geometry && json.attributes) {
+                        console.log("Attempting to load as Raw Attributes");
+                        try {
+                            const loader = new THREE.BufferGeometryLoader();
+                            geometry = loader.parse({ data: json });
+                        } catch(err) { console.warn("Raw attributes load failed", err); }
                     }
-                    else if (json['minecraft:geometry'] || json.format_version) {
-                        // Minecraft Bedrock Geometry
-                        console.log("Detected Minecraft Bedrock Geometry");
-                        geometry = parseMinecraftGeometry(json);
+
+                    // 3. Try Loading as Minecraft Bedrock
+                    if (!geometry && (json['minecraft:geometry'] || json.format_version)) {
+                        console.log("Attempting to load as Minecraft Geometry");
+                        try {
+                            geometry = parseMinecraftGeometry(json);
+                        } catch(err) { console.warn("Minecraft parser failed", err); }
                     }
-                    else if (json.data && json.data.attributes) {
-                         // Some other variant
-                         const loader = new THREE.BufferGeometryLoader();
-                         geometry = loader.parse(json);
+
+                    // 4. Try Loading as Object/Scene (Mesh)
+                    if (!geometry && (json.object || json.geometries || (json.type === 'Mesh') || json.metadata?.type === 'Object')) {
+                        console.log("Attempting to load as Object/Scene");
+                        try {
+                            const loader = new THREE.ObjectLoader();
+                            const obj = loader.parse(json);
+                            if (obj.isMesh) geometry = obj.geometry;
+                            else if (obj.children && obj.children.length > 0) {
+                                // Search for first mesh
+                                obj.traverse(c => {
+                                    if (!geometry && c.isMesh) geometry = c.geometry;
+                                });
+                            }
+                        } catch(err) { console.warn("ObjectLoader failed", err); }
                     }
-                    else {
-                        throw new Error("Unknown JSON format. Please ensure it is a Three.js BufferGeometry or Minecraft .geo.json");
+
+                    // 5. Fallback: Check for data.attributes structure passed without BufferGeometry type
+                    if (!geometry && json.data && json.data.attributes) {
+                         console.log("Attempting to load as Wrapped Data");
+                         try {
+                             const loader = new THREE.BufferGeometryLoader();
+                             geometry = loader.parse(json);
+                         } catch(err) { console.warn("Wrapped data load failed", err); }
                     }
                     
-                    if (!geometry) throw new Error("Failed to create geometry");
+                    if (!geometry) {
+                        const keys = Object.keys(json).join(', ');
+                        throw new Error(`Could not parse geometry. JSON Root Keys: [${keys}]`);
+                    }
 
+                    // Success handling
                     if (modelMesh) {
                         scene.remove(modelMesh);
                         if (modelMesh.geometry) modelMesh.geometry.dispose();
                     }
 
-                    // Center Geometry
                     geometry.computeBoundingBox();
                     geometry.center();
 
                     const material = new THREE.MeshStandardMaterial({ 
                         color: 0xaaaaaa, 
-                        // wireframe: false, // Solid is better for visualization
+                        side: THREE.DoubleSide,
                         transparent: true,
-                        opacity: 0.8,
-                        side: THREE.DoubleSide
+                        opacity: 0.9
                     });
                     
                     modelMesh = new THREE.Mesh(geometry, material);
                     scene.add(modelMesh);
                     
-                    // Add wireframe overlay
-                    const wireMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent:true, opacity:0.1 });
+                    const wireMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent:true, opacity:0.15 });
                     const wireMesh = new THREE.Mesh(geometry, wireMat);
                     modelMesh.add(wireMesh);
 
                     console.log("Model loaded successfully");
                 } catch (err) {
-                    alert("Error loading JSON: " + err.message);
                     console.error(err);
+                    alert("Error loading JSON:\n" + err.message + "\n\nSee console (F12) for details.");
                 }
             };
             reader.readAsText(file);
