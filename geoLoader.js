@@ -72,51 +72,45 @@ function parseAnyModel(json) {
     // A. Bedrock Hierarchical
     if (json['minecraft:geometry']) {
         const geos = json['minecraft:geometry'];
-        if (Array.isArray(geos) && geos.length > 0) {
-             const model = geos[0];
-             const bones = model.bones || [];
-             
-             // Hierarchy map
-             const boneMap = {};
-             bones.forEach(b => { boneMap[b.name] = { ...b, children: [] }; });
-             const roots = [];
-             bones.forEach(b => {
-                 if (b.parent && boneMap[b.parent]) boneMap[b.parent].children.push(boneMap[b.name]);
-                 else roots.push(boneMap[b.name]);
-             });
+        const model = geos[0];
+        const bones = model.bones || [];
 
-             const deg2rad = Math.PI / 180;
-             const eulerOrder = 'ZYX';
-             
-             // Recursive Matrix Calc
-             const calcMatrix = (bone, parentMat) => {
-                 const pivot = bone.pivot || [0,0,0];
-                 const rot = bone.rotation || [0,0,0];
-                 
-                 const matT = new THREE.Matrix4().makeTranslation(pivot[0], pivot[1], pivot[2]);
-                 const matR = new THREE.Matrix4().makeRotationFromEuler(
-                     new THREE.Euler(rot[0]*deg2rad, rot[1]*deg2rad, rot[2]*deg2rad, eulerOrder)
-                 );
-                 const matTInv = new THREE.Matrix4().makeTranslation(-pivot[0], -pivot[1], -pivot[2]);
-                 
-                 const localMat = matT.multiply(matR).multiply(matTInv);
-                 const worldMat = parentMat ? parentMat.clone().multiply(localMat) : localMat;
-                 
-                 if (bone.cubes) {
-                     bone.cubes.forEach(cube => {
-                         const g = createGeometryFromBedrockCube(cube);
-                         g.applyMatrix4(worldMat);
-                         geometries.push(g);
-                     });
-                 }
-                 if (bone.children) {
-                     bone.children.forEach(child => calcMatrix(child, worldMat));
-                 }
-             };
-             if(bones.length > 0) console.log("First Bone:", bones[0]);
-             roots.forEach(r => calcMatrix(r, null));
+        const map = {};
+        bones.forEach(b => map[b.name] = {...b, children:[]});
+        bones.forEach(b => {
+            if(b.parent && map[b.parent]) map[b.parent].children.push(map[b.name]);
+        });
+        const roots = bones.filter(b => !b.parent).map(b => map[b.name]);
+
+        const deg = Math.PI / 180;
+
+        function walk(bone, parentMatrix){
+            const pivot = bone.pivot || [0,0,0];
+            const rot = bone.rotation || [0,0,0];
+
+            // 正しい Bedrock 行列
+            const T = new THREE.Matrix4().makeTranslation(pivot[0],pivot[1],pivot[2]);
+            const R = new THREE.Matrix4().makeRotationFromEuler(
+            new THREE.Euler(rot[0]*deg,rot[1]*deg,rot[2]*deg,"ZYX")
+            );
+            const Ti = new THREE.Matrix4().makeTranslation(-pivot[0],-pivot[1],-pivot[2]);
+
+            let M = T.multiply(R).multiply(Ti);
+            if(parentMatrix) M = parentMatrix.clone().multiply(M);
+
+            if(bone.cubes){
+            for(const cube of bone.cubes){
+                const g = createGeometryFromBedrockCube(cube);
+                g.applyMatrix4(M);
+                geometries.push(g);
+            }
+            }
+
+            bone.children.forEach(ch => walk(ch, M));
         }
-    }
+
+        roots.forEach(r => walk(r, null));
+        }
     // B. Blockbench Generic
     else if (json.elements) {
          console.log("Parsing as Generic Elements");
