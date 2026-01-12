@@ -2,58 +2,80 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.158/build/three.mod
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/controls/OrbitControls.js'
 import { loadGeoJson } from './geoLoader.js'
 
-let scene = new THREE.Scene()
+const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x222222)
 
-let camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000)
-camera.position.set(10,10,10)
+const camera = new THREE.PerspectiveCamera(
+  60,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  10000
+)
+camera.position.set(10, 10, 10)
 
-let renderer = new THREE.WebGLRenderer({antialias:true})
+const renderer = new THREE.WebGLRenderer({ antialias: true })
+renderer.setPixelRatio(window.devicePixelRatio)
 renderer.setSize(window.innerWidth, window.innerHeight)
 document.body.appendChild(renderer.domElement)
 
-let controls = new OrbitControls(camera, renderer.domElement)
+const controls = new OrbitControls(camera, renderer.domElement)
+controls.enableDamping = true
 
-scene.add(new THREE.AmbientLight(0xffffff,1))
-scene.add(new THREE.GridHelper(50,50))
+scene.add(new THREE.AmbientLight(0xffffff, 1))
+scene.add(new THREE.GridHelper(100, 100))
 
 let mesh = null
 
-document.getElementById("file").onchange = async e=>{
-  if(mesh) scene.remove(mesh)
+document.getElementById("file").addEventListener("change", async (e) => {
+  if (mesh) {
+    scene.remove(mesh)
+    mesh.geometry.dispose()
+    mesh.material.dispose()
+  }
 
   try {
     const geo = await loadGeoJson(e.target.files[0])
     geo.computeVertexNormals()
 
-    const mat = new THREE.MeshStandardMaterial({color:0xcccccc, flatShading:false})
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xcccccc,
+      roughness: 0.8,
+      metalness: 0.1
+    })
+
     mesh = new THREE.Mesh(geo, mat)
     scene.add(mesh)
 
-    // 自動でカメラをフィット
+    // カメラをモデルにフィット
     const box = new THREE.Box3().setFromObject(mesh)
     const size = box.getSize(new THREE.Vector3()).length()
     const center = box.getCenter(new THREE.Vector3())
+
+    camera.near = size / 100
+    camera.far = size * 100
+    camera.updateProjectionMatrix()
 
     camera.position.copy(center).add(new THREE.Vector3(size, size, size))
     controls.target.copy(center)
     controls.update()
 
-  } catch(err){
-    alert(err.message)
+    console.log("Loaded geometry vertices:", geo.attributes.position.count)
+
+  } catch (err) {
+    alert("Load failed: " + err.message)
     console.error(err)
   }
-}
+})
 
-window.onresize = ()=>{
-  camera.aspect = window.innerWidth/window.innerHeight
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
-  renderer.setSize(window.innerWidth,window.innerHeight)
-}
+  renderer.setSize(window.innerWidth, window.innerHeight)
+})
 
-function loop(){
-  requestAnimationFrame(loop)
+function animate() {
+  requestAnimationFrame(animate)
   controls.update()
-  renderer.render(scene,camera)
+  renderer.render(scene, camera)
 }
-loop()
+animate()
