@@ -1,89 +1,26 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto OBB Generator for Minecraft</title>
-    <link rel="stylesheet" href="css/style.css">
-    
-    <!-- Dependencies -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
-    
-    <!-- Import Map for Three.js -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-            }
-        }
-    </script>
+<meta charset="utf-8">
+<title>OBB Generator</title>
+<style>
+body { margin:0; overflow:hidden; display:flex; }
+#view { flex:1; }
+#panel {
+  width:300px; background:#222; color:white;
+  padding:10px; font-family:monospace;
+}
+textarea { width:100%; height:200px; }
+button { width:100%; margin:5px 0; }
+</style>
 </head>
 <body>
-
-    <div id="container"></div>
-    <div id="loading-overlay">Processing...</div>
-
-    <div id="sidebar">
-        <h2>OBB Generator</h2>
-        
-        <div class="control-group">
-            <label>1. Model Load (geo.json)</label>
-            <input type="file" id="fileInput" accept=".json">
-        </div>
-
-        <div class="control-group">
-            <label>2. Generation Settings</label>
-            <label>Clusters (OBB Count): <span id="clusterVal">5</span></label>
-            <input type="range" id="clusterRange" min="1" max="20" value="5" step="1">
-            <button id="btnGenerate">Generate OBBs</button>
-        </div>
-
-        <div class="control-group" id="editPanel" style="display:none;">
-            <label>3. Edit Selected OBB</label>
-            <div class="row">
-                <button id="btnModeTranslate" style="background:#555;">Move</button>
-                <button id="btnModeScale" style="background:#555;">Scale</button>
-                <button id="btnModeRotate" style="background:#555;">Rotate</button>
-            </div>
-            
-            <label style="margin-top:10px;">Position (X, Y, Z)</label>
-            <div class="row">
-                <input type="number" id="inpPosX" step="0.1">
-                <input type="number" id="inpPosY" step="0.1">
-                <input type="number" id="inpPosZ" step="0.1">
-            </div>
-
-            <label>Size (X, Y, Z)</label>
-            <div class="row">
-                <input type="number" id="inpSizeX" step="0.1">
-                <input type="number" id="inpSizeY" step="0.1">
-                <input type="number" id="inpSizeZ" step="0.1">
-            </div>
-            
-             <label>Rotation (Deg)</label>
-            <div class="row">
-                <input type="number" id="inpRotX" step="1">
-                <input type="number" id="inpRotY" step="1">
-                <input type="number" id="inpRotZ" step="1">
-            </div>
-
-            <button class="delete" id="btnDelete">Delete Selected</button>
-        </div>
-        
-        <div class="control-group">
-            <button id="btnAddOBB" style="background:#44aa44;">Add New OBB</button>
-        </div>
-
-        <div class="control-group">
-            <label>4. Output JSON</label>
-            <textarea id="jsonOutput" readonly></textarea>
-            <button id="btnCopy">Copy to Clipboard</button>
-        </div>
-    </div>
-
-    <!-- Application Entry Point -->
-    <script type="module" src="js/main.js"></script>
-
+<div id="view"></div>
+<div id="panel">
+<input type="file" id="file"><br>
+<button id="gen">Generate OBB</button>
+<textarea id="out"></textarea>
+</div>
+<script type="module" src="main.js"></script>
 </body>
 </html>
