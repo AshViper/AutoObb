@@ -7,11 +7,10 @@
 body { margin:0; display:flex; height:100vh; background:#111; color:white; }
 #view { flex:1; }
 #panel {
-  width:360px;
+  width:320px;
   background:#1e1e1e;
   padding:10px;
   font-family:monospace;
-  overflow:auto;
 }
 button,input { width:100%; margin:4px 0; }
 textarea { width:100%; height:200px; }
@@ -21,11 +20,7 @@ textarea { width:100%; height:200px; }
 <div id="view"></div>
 <div id="panel">
   <input type="file" id="file">
-  <label>OBB Count</label>
-  <input type="range" id="count" min="1" max="12" value="4">
   <button id="gen">Generate OBB</button>
-  <button id="add">Add OBB</button>
-  <button id="del">Delete Selected</button>
   <textarea id="json"></textarea>
 </div>
 <script type="module" src="main.js"></script>
