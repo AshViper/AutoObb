@@ -2,24 +2,31 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>OBB Generator</title>
+<title>OBB Editor</title>
 <style>
-body { margin:0; overflow:hidden; display:flex; }
+body { margin:0; display:flex; height:100vh; background:#111; color:white; }
 #view { flex:1; }
 #panel {
-  width:300px; background:#222; color:white;
-  padding:10px; font-family:monospace;
+  width:360px;
+  background:#1e1e1e;
+  padding:10px;
+  font-family:monospace;
+  overflow:auto;
 }
+button,input { width:100%; margin:4px 0; }
 textarea { width:100%; height:200px; }
-button { width:100%; margin:5px 0; }
 </style>
 </head>
 <body>
 <div id="view"></div>
 <div id="panel">
-<input type="file" id="file"><br>
-<button id="gen">Generate OBB</button>
-<textarea id="out"></textarea>
+  <input type="file" id="file">
+  <label>OBB Count</label>
+  <input type="range" id="count" min="1" max="12" value="4">
+  <button id="gen">Generate OBB</button>
+  <button id="add">Add OBB</button>
+  <button id="del">Delete Selected</button>
+  <textarea id="json"></textarea>
 </div>
 <script type="module" src="main.js"></script>
 </body>

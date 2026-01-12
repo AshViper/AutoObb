@@ -1,18 +1,24 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.158/build/three.module.js'
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/controls/OrbitControls.js'
+import { TransformControls } from 'https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/controls/TransformControls.js'
 import { loadGeoJson } from './geoLoader.js'
 
 let scene = new THREE.Scene()
 let cam = new THREE.PerspectiveCamera(60,1,0.1,1000)
-cam.position.set(10,10,10)
+cam.position.set(10,8,10)
 
 let renderer = new THREE.WebGLRenderer({antialias:true})
 document.getElementById("view").appendChild(renderer.domElement)
 
-let controls = new OrbitControls(cam, renderer.domElement)
+let orbit = new OrbitControls(cam, renderer.domElement)
+let transform = new TransformControls(cam, renderer.domElement)
+scene.add(transform)
 
-let mesh, obbGroup = new THREE.Group()
-scene.add(obbGroup)
+let model, obbs = []
+let selected = null
+
+scene.add(new THREE.GridHelper(50,50))
+scene.add(new THREE.AmbientLight(0xffffff,1))
 
 function resize(){
   const w = document.getElementById("view").clientWidth
@@ -24,56 +30,89 @@ function resize(){
 window.onresize=resize
 resize()
 
-scene.add(new THREE.GridHelper(20,20))
-scene.add(new THREE.AmbientLight(0xffffff,1))
-
 document.getElementById("file").onchange = async e=>{
+  if(model) scene.remove(model)
   const geo = await loadGeoJson(e.target.files[0])
-  const mat = new THREE.MeshNormalMaterial({wireframe:true})
-  mesh = new THREE.Mesh(geo,mat)
-  scene.add(mesh)
+  model = new THREE.Mesh(geo, new THREE.MeshNormalMaterial({wireframe:true}))
+  scene.add(model)
 }
 
 document.getElementById("gen").onclick = ()=>{
-  if(!mesh) return
-  generateOBB(mesh.geometry)
+  clearOBB()
+  const n = document.getElementById("count").value
+  const box = new THREE.Box3().setFromObject(model)
+  for(let i=0;i<n;i++){
+    const size = box.getSize(new THREE.Vector3()).multiplyScalar(1/n)
+    const center = box.getCenter(new THREE.Vector3())
+    center.x += (i - n/2) * size.x
+    createOBB(size,center)
+  }
+  updateJSON()
 }
 
-function generateOBB(geo){
-  obbGroup.clear()
+document.getElementById("add").onclick = ()=>createOBB(new THREE.Vector3(1,1,1), new THREE.Vector3())
+document.getElementById("del").onclick = ()=>{
+  if(!selected) return
+  scene.remove(selected)
+  obbs = obbs.filter(o=>o!==selected)
+  selected=null
+  updateJSON()
+}
 
-  const pos = geo.attributes.position.array
-  let min = new THREE.Vector3(1e9,1e9,1e9)
-  let max = new THREE.Vector3(-1e9,-1e9,-1e9)
-
-  for(let i=0;i<pos.length;i+=3){
-    min.min(new THREE.Vector3(pos[i],pos[i+1],pos[i+2]))
-    max.max(new THREE.Vector3(pos[i],pos[i+1],pos[i+2]))
-  }
-
-  const size = new THREE.Vector3().subVectors(max,min)
-  const center = new THREE.Vector3().addVectors(max,min).multiplyScalar(0.5)
-
+function createOBB(size,center){
   const box = new THREE.BoxGeometry(size.x,size.y,size.z)
-  const wire = new THREE.LineSegments(
+  const mesh = new THREE.LineSegments(
     new THREE.WireframeGeometry(box),
     new THREE.LineBasicMaterial({color:0x00ff00})
   )
-  wire.position.copy(center)
-  obbGroup.add(wire)
+  mesh.position.copy(center)
+  scene.add(mesh)
+  obbs.push(mesh)
+}
 
-  const json = {
-    OBB:[{
-      Size:[size.x,size.y,size.z],
-      Position:[center.x,center.y,center.z]
-    }]
+renderer.domElement.addEventListener('pointerdown', e=>{
+  const ray = new THREE.Raycaster()
+  const mouse = new THREE.Vector2(
+    (e.clientX/renderer.domElement.clientWidth)*2-1,
+    -(e.clientY/window.innerHeight)*2+1
+  )
+  ray.setFromCamera(mouse,cam)
+  const hit = ray.intersectObjects(obbs)
+  if(hit.length){
+    select(hit[0].object)
   }
-  document.getElementById("out").value = JSON.stringify(json,null,2)
+})
+
+function select(obj){
+  if(selected) selected.material.color.set(0x00ff00)
+  selected = obj
+  obj.material.color.set(0xffff00)
+  transform.attach(obj)
+}
+
+transform.addEventListener("objectChange", updateJSON)
+
+function clearOBB(){
+  obbs.forEach(o=>scene.remove(o))
+  obbs=[]
+}
+
+function updateJSON(){
+  const data = {
+    OBB: obbs.map(o=>{
+      const s = new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3())
+      return {
+        Size:[s.x,s.y,s.z],
+        Position:[o.position.x,o.position.y,o.position.z]
+      }
+    })
+  }
+  document.getElementById("json").value = JSON.stringify(data,null,2)
 }
 
 function loop(){
   requestAnimationFrame(loop)
-  controls.update()
+  orbit.update()
   renderer.render(scene,cam)
 }
 loop()
