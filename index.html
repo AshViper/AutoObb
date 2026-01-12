@@ -211,97 +211,228 @@
             reader.onload = function(e) {
                 try {
                     const json = JSON.parse(e.target.result);
-                    console.log("Loaded JSON Structure:", Object.keys(json));
-                    if(json.data) console.log("json.data keys:", Object.keys(json.data));
+                    console.log("Loaded JSON Keys:", Object.keys(json));
+                    if (json.data) console.log("json.data Keys:", Object.keys(json.data));
                     
                     let geometry = null;
+                    let errorLog = [];
 
-                    // 1. Try Loading as Standard BufferGeometry
-                    if (json.type === 'BufferGeometry' && json.data) {
-                        console.log("Attempting to load as BufferGeometry");
+                    // Helper to try a loader
+                    const tryLoad = (name, loaderFn) => {
                         try {
-                            const loader = new THREE.BufferGeometryLoader();
-                            geometry = loader.parse(json);
-                        } catch(err) { console.warn("BufferGeometryLoader failed", err); }
-                    } 
-                    
-                    // 2. Try Loading as Raw Attributes (Direct Data)
-                    if (!geometry && json.attributes) {
-                        console.log("Attempting to load as Raw Attributes");
-                        try {
-                            const loader = new THREE.BufferGeometryLoader();
-                            geometry = loader.parse({ data: json });
-                        } catch(err) { console.warn("Raw attributes load failed", err); }
-                    }
-
-                    // 3. Try Loading as Minecraft Bedrock
-                    if (!geometry && (json['minecraft:geometry'] || json.format_version)) {
-                        console.log("Attempting to load as Minecraft Geometry");
-                        try {
-                            geometry = parseMinecraftGeometry(json);
-                        } catch(err) { console.warn("Minecraft parser failed", err); }
-                    }
-
-                    // 4. Try Loading as Object/Scene (Mesh)
-                    if (!geometry && (json.object || json.geometries || (json.type === 'Mesh') || json.metadata?.type === 'Object')) {
-                        console.log("Attempting to load as Object/Scene");
-                        try {
-                            const loader = new THREE.ObjectLoader();
-                            const obj = loader.parse(json);
-                            if (obj.isMesh) geometry = obj.geometry;
-                            else if (obj.children && obj.children.length > 0) {
-                                // Search for first mesh
-                                obj.traverse(c => {
-                                    if (!geometry && c.isMesh) geometry = c.geometry;
-                                });
+                            const res = loaderFn();
+                            if (res) {
+                                console.log(`Success: ${name}`);
+                                return res;
                             }
-                        } catch(err) { console.warn("ObjectLoader failed", err); }
-                    }
+                        } catch (err) {
+                            console.warn(`Failed: ${name}`, err);
+                            errorLog.push(`${name}: ${err.message}`);
+                        }
+                        return null;
+                    };
 
-                    // 5. Fallback: Check for data.attributes structure passed without BufferGeometry type
-                    if (!geometry && json.data && json.data.attributes) {
-                         console.log("Attempting to load as Wrapped Data");
-                         try {
-                             const loader = new THREE.BufferGeometryLoader();
-                             geometry = loader.parse(json);
-                         } catch(err) { console.warn("Wrapped data load failed", err); }
-                    }
-                    
+                    // 1. Blockbench Generic / Bedrock (Manual Parse)
                     if (!geometry) {
-                        const keys = Object.keys(json).join(', ');
-                        throw new Error(`Could not parse geometry. JSON Root Keys: [${keys}]`);
+                         geometry = tryLoad("Manual Parser (Minecraft/Blockbench)", () => parseAnyModel(json));
                     }
 
-                    // Success handling
+                    // 2. Standard Three.js BufferGeometry
+                    if (!geometry && json.type === 'BufferGeometry') {
+                        geometry = tryLoad("Three.js BufferGeometry", () => new THREE.BufferGeometryLoader().parse(json));
+                    }
+
+                    // 3. Raw Attributes
+                    if (!geometry && json.attributes) {
+                        geometry = tryLoad("Raw Attributes", () => new THREE.BufferGeometryLoader().parse({ data: json }));
+                    }
+
+                    // 4. Object Loader
+                    if (!geometry && (json.object || json.geometries || json.type === 'Mesh' || json.type === 'Object3D')) {
+                         geometry = tryLoad("ObjectLoader", () => {
+                             const obj = new THREE.ObjectLoader().parse(json);
+                             if (obj.isMesh) return obj.geometry;
+                             if (obj.children) { // Find first mesh
+                                 let found = null;
+                                 obj.traverse(c => { if(c.isMesh && !found) found = c.geometry; });
+                                 return found;
+                             }
+                             return null;
+                         });
+                    }
+
+                    if (!geometry) {
+                        throw new Error("No valid geometry found in JSON.\nTried:\n" + errorLog.join('\n'));
+                    }
+
+                    // Dispose old
                     if (modelMesh) {
                         scene.remove(modelMesh);
                         if (modelMesh.geometry) modelMesh.geometry.dispose();
                     }
 
+                    // Post-Process
                     geometry.computeBoundingBox();
-                    geometry.center();
+                    try { 
+                        geometry.center(); 
+                    } catch(e) { console.warn("Center failed", e); }
 
+                    // Material
                     const material = new THREE.MeshStandardMaterial({ 
                         color: 0xaaaaaa, 
                         side: THREE.DoubleSide,
                         transparent: true,
-                        opacity: 0.9
+                        opacity: 0.8
                     });
                     
                     modelMesh = new THREE.Mesh(geometry, material);
                     scene.add(modelMesh);
                     
+                    // Wireframe
                     const wireMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent:true, opacity:0.15 });
                     const wireMesh = new THREE.Mesh(geometry, wireMat);
                     modelMesh.add(wireMesh);
 
                     console.log("Model loaded successfully");
+
                 } catch (err) {
                     console.error(err);
-                    alert("Error loading JSON:\n" + err.message + "\n\nSee console (F12) for details.");
+                    alert("Error loading JSON:\n" + err.message + "\n\nStack:\n" + err.stack);
                 }
             };
             reader.readAsText(file);
+        }
+
+        // Unified manual parser for Minecraft Bedrock & Blockbench Generic
+        function parseAnyModel(json) {
+            let geometries = [];
+
+            // A. Minecraft Bedrock (.geo.json)
+            if (json['minecraft:geometry']) {
+                const geos = json['minecraft:geometry'];
+                if (Array.isArray(geos) && geos.length > 0) {
+                     const bones = geos[0].bones;
+                     if (bones) {
+                         bones.forEach(bone => {
+                             if (!bone.cubes) return;
+                             bone.cubes.forEach(cube => {
+                                 geometries.push(createBoxFromCube(cube, bone.pivot)); // Pivot is usually bone pivot
+                             });
+                         });
+                     }
+                }
+            }
+            
+            // B. Blockbench Generic (.json with 'elements')
+            if (json.elements) {
+                 json.elements.forEach(el => {
+                     geometries.push(createBoxFromElement(el));
+                 });
+            }
+            
+            // C. Legacy/Other 'cubes' array at root
+            if (json.cubes && !json['minecraft:geometry']) {
+                json.cubes.forEach(cube => {
+                    geometries.push(createBoxFromCube(cube));
+                });
+            }
+
+            if (geometries.length === 0) return null; // Let other loaders try
+
+            return mergeGeometries(geometries);
+        }
+
+        function createBoxFromCube(cube, parentPivot) {
+             const size = cube.size || [1,1,1];
+             const origin = cube.origin || [0,0,0];
+             const rot = cube.rotation;
+             const pivot = cube.pivot || parentPivot || origin; // Pivot priority
+
+             const box = new THREE.BoxGeometry(size[0], size[1], size[2]);
+             
+             // Geo Origin (corner) to Center
+             const cx = origin[0] + size[0]/2;
+             const cy = origin[1] + size[1]/2;
+             const cz = origin[2] + size[2]/2;
+             
+             // 1. Move to Center
+             box.translate(cx, cy, cz);
+
+             // 2. Rotate around Pivot
+             if (rot || cube.pivot) { // If pivot exists, we assume rotation might happen or just pivot reset
+                 // Move to pivot as origin
+                 box.translate(-pivot[0], -pivot[1], -pivot[2]);
+                 
+                 if (rot) {
+                    const rx = THREE.MathUtils.degToRad(rot[0]||0);
+                    const ry = THREE.MathUtils.degToRad(rot[1]||0);
+                    const rz = THREE.MathUtils.degToRad(rot[2]||0);
+                    box.rotateX(rx);
+                    box.rotateY(ry);
+                    box.rotateZ(rz);
+                 }
+                 
+                 // Move back
+                 box.translate(pivot[0], pivot[1], pivot[2]);
+             }
+             
+             return box;
+        }
+
+        function createBoxFromElement(el) {
+            // Blockbench Generic: { from: [x,y,z], to: [x,y,z], rotation: { origin, axis, angle } }
+            const from = el.from || [0,0,0];
+            const to = el.to || [1,1,1];
+            
+            const w = Math.abs(to[0] - from[0]);
+            const h = Math.abs(to[1] - from[1]);
+            const d = Math.abs(to[2] - from[2]);
+            
+            const box = new THREE.BoxGeometry(w, h, d);
+            const cx = (from[0] + to[0]) / 2;
+            const cy = (from[1] + to[1]) / 2;
+            const cz = (from[2] + to[2]) / 2;
+            
+            box.translate(cx, cy, cz);
+            
+            if (el.rotation) {
+                const origin = el.rotation.origin || [cx, cy, cz];
+                const axis = el.rotation.axis || 'y';
+                const angle = el.rotation.angle || 0;
+                
+                box.translate(-origin[0], -origin[1], -origin[2]);
+                
+                const rad = THREE.MathUtils.degToRad(angle);
+                if (axis === 'x') box.rotateX(rad);
+                if (axis === 'y') box.rotateY(rad);
+                if (axis === 'z') box.rotateZ(rad);
+                
+                box.translate(origin[0], origin[1], origin[2]);
+            }
+            return box;
+        }
+
+        function mergeGeometries(geometries) {
+            // Manual Merge
+            let totalVertices = 0;
+            geometries.forEach(g => {
+                totalVertices += g.attributes.position.count;
+            });
+            
+            const positionArray = new Float32Array(totalVertices * 3);
+            let offset = 0;
+            
+            geometries.forEach(g => {
+                const arr = g.attributes.position.array;
+                const count = g.attributes.position.count;
+                positionArray.set(arr, offset * 3);
+                offset += count;
+                g.dispose();
+            });
+            
+            const merged = new THREE.BufferGeometry();
+            merged.setAttribute('position', new THREE.BufferAttribute(positionArray, 3));
+            return merged;
         }
 
         function parseMinecraftGeometry(json) {
