@@ -307,80 +307,155 @@
         function parseAnyModel(json) {
             let geometries = [];
 
-            // A. Minecraft Bedrock (.geo.json)
+            // A. Minecraft Bedrock (.geo.json) - HIERARCHICAL
             if (json['minecraft:geometry']) {
                 const geos = json['minecraft:geometry'];
                 if (Array.isArray(geos) && geos.length > 0) {
-                     const bones = geos[0].bones;
-                     if (bones) {
-                         bones.forEach(bone => {
-                             if (!bone.cubes) return;
+                     const model = geos[0];
+                     const bones = model.bones || [];
+                     
+                     // 1. Build Map & Hierarchy
+                     const boneMap = {};
+                     bones.forEach(b => { 
+                         boneMap[b.name] = { ...b, children: [] }; 
+                     });
+                     
+                     const roots = [];
+                     bones.forEach(b => {
+                         if (b.parent && boneMap[b.parent]) {
+                             boneMap[b.parent].children.push(boneMap[b.name]);
+                             // boneMap[b.name].parentObj = boneMap[b.parent]; 
+                         } else {
+                             roots.push(boneMap[b.name]);
+                         }
+                     });
+
+                     // 2. Recursive Transform Calculation
+                     // Bedrock transforms are: Translate(pivot) * Rotate * Translate(-pivot)
+                     // Because bones define a local coordinate system shift for their children.
+                     
+                     const deg2rad = Math.PI / 180;
+                     const eulerOrder = 'ZYX'; // Consistent with Blockbench/Bedrock
+                     
+                     const calcMatrix = (bone, parentMat) => {
+                         const pivot = bone.pivot || [0,0,0];
+                         const rot = bone.rotation || [0,0,0];
+                         
+                         // Bone Transformation Matrix
+                         // Computes the transform of this bone RELATIVE TO PARENT.
+                         // Actually, Bedrock `pivot` is in Model Space (if root) or Parent Space?
+                         // "Pivots are absolute" is the common standard in Bedrock .geo.json
+                         
+                         // If Pivot is absolute world space:
+                         // Rotation occurs around Pivot.
+                         // So the transform matrix for this bone is:
+                         // T(P) * R * T(-P)
+                         // BUT, all children (and this bone's cubes) are subject to this rotation.
+                         // If a child also has a pivot, it rotates around *that* pivot, but that pivot itself has been moved by the parent.
+                         
+                         // So: WorldMat = ParentMat * LocalMat
+                         // LocalMat = T(P) * R * T(-P)  <-- This rotates space around P
+                         
+                         const matT = new THREE.Matrix4().makeTranslation(pivot[0], pivot[1], pivot[2]);
+                         const matR = new THREE.Matrix4().makeRotationFromEuler(
+                             new THREE.Euler(rot[0]*deg2rad, rot[1]*deg2rad, rot[2]*deg2rad, eulerOrder)
+                         );
+                         const matTInv = new THREE.Matrix4().makeTranslation(-pivot[0], -pivot[1], -pivot[2]);
+                         
+                         const localMat = matT.multiply(matR).multiply(matTInv);
+                         const worldMat = parentMat ? parentMat.clone().multiply(localMat) : localMat;
+                         
+                         // Process Cubes
+                         if (bone.cubes) {
                              bone.cubes.forEach(cube => {
-                                 geometries.push(createBoxFromCube(cube, bone.pivot)); // Pivot is usually bone pivot
+                                 const g = createGeometryFromBedrockCube(cube);
+                                 // Geometry is currently in World Space (assuming no bone rotation).
+                                 // Apply Bone Transform.
+                                 g.applyMatrix4(worldMat);
+                                 geometries.push(g);
                              });
-                         });
-                     }
+                         }
+                         
+                         // Recurse
+                         if (bone.children) {
+                             bone.children.forEach(child => calcMatrix(child, worldMat));
+                         }
+                     };
+                     
+                     roots.forEach(r => calcMatrix(r, null));
                 }
             }
-            
-            // B. Blockbench Generic (.json with 'elements')
-            if (json.elements) {
+            // B. Blockbench Generic (.json with 'elements') - FLAT
+            else if (json.elements) {
                  json.elements.forEach(el => {
-                     geometries.push(createBoxFromElement(el));
+                     geometries.push(createGeometryFromGenericElement(el));
                  });
             }
-            
-            // C. Legacy/Other 'cubes' array at root
-            if (json.cubes && !json['minecraft:geometry']) {
+            // C. Legacy/Other - FLAT
+            else if (json.cubes && !json['minecraft:geometry']) {
                 json.cubes.forEach(cube => {
-                    geometries.push(createBoxFromCube(cube));
+                    const size = cube.size || [1,1,1];
+                    const origin = cube.origin || [0,0,0];
+                    const g = new THREE.BoxGeometry(size[0], size[1], size[2]);
+                    g.translate(origin[0]+size[0]/2, origin[1]+size[1]/2, origin[2]+size[2]/2);
+                    geometries.push(g);
                 });
             }
 
-            if (geometries.length === 0) return null; // Let other loaders try
+            if (geometries.length === 0) return null; 
 
             return mergeGeometries(geometries);
         }
 
-        function createBoxFromCube(cube, parentPivot) {
-             const size = cube.size || [1,1,1];
+        function createGeometryFromBedrockCube(cube) {
+             const size = cube.size || [0,0,0];
              const origin = cube.origin || [0,0,0];
-             const rot = cube.rotation;
-             const pivot = cube.pivot || parentPivot || origin; // Pivot priority
+             const rot = cube.rotation; 
+             const pivot = cube.pivot || origin; 
+             const inflate = cube.inflate || 0;
 
-             const box = new THREE.BoxGeometry(size[0], size[1], size[2]);
+             // Only create if valid size
+             if (size[0]<=0 && size[1]<=0 && size[2]<=0) return new THREE.BufferGeometry();
+
+             const w = size[0] + inflate*2;
+             const h = size[1] + inflate*2;
+             const d = size[2] + inflate*2;
+
+             const box = new THREE.BoxGeometry(w, h, d);
              
-             // Geo Origin (corner) to Center
+             // Create box centered at 0
+             // Move to World Position (Origin + HalfSize)
              const cx = origin[0] + size[0]/2;
              const cy = origin[1] + size[1]/2;
              const cz = origin[2] + size[2]/2;
              
-             // 1. Move to Center
-             box.translate(cx, cy, cz);
-
-             // 2. Rotate around Pivot
-             if (rot || cube.pivot) { // If pivot exists, we assume rotation might happen or just pivot reset
-                 // Move to pivot as origin
-                 box.translate(-pivot[0], -pivot[1], -pivot[2]);
+             box.translate(cx, cy, cz); 
+             
+             // Handle Cube-level rotation (Around cube pivot)
+             if (rot) {
+                 const px = pivot[0];
+                 const py = pivot[1];
+                 const pz = pivot[2];
                  
-                 if (rot) {
-                    const rx = THREE.MathUtils.degToRad(rot[0]||0);
-                    const ry = THREE.MathUtils.degToRad(rot[1]||0);
-                    const rz = THREE.MathUtils.degToRad(rot[2]||0);
-                    box.rotateX(rx);
-                    box.rotateY(ry);
-                    box.rotateZ(rz);
-                 }
+                 box.translate(-px, -py, -pz);
                  
-                 // Move back
-                 box.translate(pivot[0], pivot[1], pivot[2]);
+                 const deg2rad = Math.PI / 180;
+                 const rx = (rot[0]||0) * deg2rad;
+                 const ry = (rot[1]||0) * deg2rad;
+                 const rz = (rot[2]||0) * deg2rad;
+                 
+                 // Cube rotation order - matches bone
+                 box.rotateX(rx);
+                 box.rotateY(ry);
+                 box.rotateZ(rz);
+                 
+                 box.translate(px, py, pz);
              }
              
              return box;
         }
 
-        function createBoxFromElement(el) {
-            // Blockbench Generic: { from: [x,y,z], to: [x,y,z], rotation: { origin, axis, angle } }
+        function createGeometryFromGenericElement(el) {
             const from = el.from || [0,0,0];
             const to = el.to || [1,1,1];
             
@@ -413,16 +488,18 @@
         }
 
         function mergeGeometries(geometries) {
-            // Manual Merge
             let totalVertices = 0;
             geometries.forEach(g => {
-                totalVertices += g.attributes.position.count;
+                if(g && g.attributes.position) totalVertices += g.attributes.position.count;
             });
             
+            if (totalVertices === 0) return null;
+
             const positionArray = new Float32Array(totalVertices * 3);
             let offset = 0;
             
             geometries.forEach(g => {
+                if(!g || !g.attributes.position) return;
                 const arr = g.attributes.position.array;
                 const count = g.attributes.position.count;
                 positionArray.set(arr, offset * 3);
