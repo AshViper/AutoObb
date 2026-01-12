@@ -2,26 +2,19 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>OBB Editor</title>
+<title>geo.json Viewer</title>
 <style>
-body { margin:0; display:flex; height:100vh; background:#111; color:white; }
-#view { flex:1; }
-#panel {
-  width:320px;
-  background:#1e1e1e;
-  padding:10px;
+body { margin:0; background:#111; overflow:hidden; }
+#ui {
+  position:absolute; top:10px; left:10px;
+  background:#222; padding:10px; color:white;
   font-family:monospace;
 }
-button,input { width:100%; margin:4px 0; }
-textarea { width:100%; height:200px; }
 </style>
 </head>
 <body>
-<div id="view"></div>
-<div id="panel">
+<div id="ui">
   <input type="file" id="file">
-  <button id="gen">Generate OBB</button>
-  <textarea id="json"></textarea>
 </div>
 <script type="module" src="main.js"></script>
 </body>

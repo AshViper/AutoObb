@@ -2,73 +2,53 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.158/build/three.mod
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/controls/OrbitControls.js'
 import { loadGeoJson } from './geoLoader.js'
 
-const view = document.getElementById("view")
+let scene = new THREE.Scene()
+scene.background = new THREE.Color(0x222222)
 
-const scene = new THREE.Scene()
-scene.background = new THREE.Color(0x202020)
-
-const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000)
+let camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000)
 camera.position.set(10,10,10)
 
-const renderer = new THREE.WebGLRenderer({antialias:true})
-view.appendChild(renderer.domElement)
+let renderer = new THREE.WebGLRenderer({antialias:true})
+renderer.setSize(window.innerWidth, window.innerHeight)
+document.body.appendChild(renderer.domElement)
 
-const controls = new OrbitControls(camera, renderer.domElement)
+let controls = new OrbitControls(camera, renderer.domElement)
 
-scene.add(new THREE.AmbientLight(0xffffff, 1))
+scene.add(new THREE.AmbientLight(0xffffff,1))
 scene.add(new THREE.GridHelper(50,50))
 
-let mesh
-let obb
-
-function resize(){
-  const w = view.clientWidth
-  const h = view.clientHeight
-  camera.aspect = w/h
-  camera.updateProjectionMatrix()
-  renderer.setSize(w,h)
-}
-window.addEventListener('resize', resize)
-resize()
+let mesh = null
 
 document.getElementById("file").onchange = async e=>{
   if(mesh) scene.remove(mesh)
-  const geo = await loadGeoJson(e.target.files[0])
-  geo.computeVertexNormals()
 
-  const mat = new THREE.MeshStandardMaterial({color:0xcccccc, wireframe:false})
-  mesh = new THREE.Mesh(geo, mat)
-  scene.add(mesh)
+  try {
+    const geo = await loadGeoJson(e.target.files[0])
+    geo.computeVertexNormals()
 
-  camera.position.set(10,10,10)
-  controls.target.set(0,0,0)
-  controls.update()
+    const mat = new THREE.MeshStandardMaterial({color:0xcccccc, flatShading:false})
+    mesh = new THREE.Mesh(geo, mat)
+    scene.add(mesh)
+
+    // 自動でカメラをフィット
+    const box = new THREE.Box3().setFromObject(mesh)
+    const size = box.getSize(new THREE.Vector3()).length()
+    const center = box.getCenter(new THREE.Vector3())
+
+    camera.position.copy(center).add(new THREE.Vector3(size, size, size))
+    controls.target.copy(center)
+    controls.update()
+
+  } catch(err){
+    alert(err.message)
+    console.error(err)
+  }
 }
 
-document.getElementById("gen").onclick = ()=>{
-  if(!mesh) return
-  if(obb) scene.remove(obb)
-
-  const box = new THREE.Box3().setFromObject(mesh)
-  const size = box.getSize(new THREE.Vector3())
-  const center = box.getCenter(new THREE.Vector3())
-
-  const geo = new THREE.BoxGeometry(size.x,size.y,size.z)
-  const wire = new THREE.LineSegments(
-    new THREE.WireframeGeometry(geo),
-    new THREE.LineBasicMaterial({color:0x00ff00})
-  )
-  wire.position.copy(center)
-  scene.add(wire)
-  obb = wire
-
-  const out = {
-    OBB:[{
-      Size:[size.x,size.y,size.z],
-      Position:[center.x,center.y,center.z]
-    }]
-  }
-  document.getElementById("json").value = JSON.stringify(out,null,2)
+window.onresize = ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight
+  camera.updateProjectionMatrix()
+  renderer.setSize(window.innerWidth,window.innerHeight)
 }
 
 function loop(){
