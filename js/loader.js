@@ -94,9 +94,8 @@ function parseAnyModel(json) {
                  const rot = bone.rotation || [0,0,0];
                  
                  const matT = new THREE.Matrix4().makeTranslation(pivot[0], pivot[1], pivot[2]);
-                 // Negate rotations for Bedrock -> Three.js conversion
                  const matR = new THREE.Matrix4().makeRotationFromEuler(
-                     new THREE.Euler(-rot[0]*deg2rad, -rot[1]*deg2rad, -rot[2]*deg2rad, eulerOrder)
+                     new THREE.Euler(rot[0]*deg2rad, rot[1]*deg2rad, rot[2]*deg2rad, eulerOrder)
                  );
                  const matTInv = new THREE.Matrix4().makeTranslation(-pivot[0], -pivot[1], -pivot[2]);
                  
@@ -114,11 +113,13 @@ function parseAnyModel(json) {
                      bone.children.forEach(child => calcMatrix(child, worldMat));
                  }
              };
+             if(bones.length > 0) console.log("First Bone:", bones[0]);
              roots.forEach(r => calcMatrix(r, null));
         }
     }
     // B. Blockbench Generic
     else if (json.elements) {
+         console.log("Parsing as Generic Elements");
          json.elements.forEach(el => geometries.push(createGeometryFromGenericElement(el)));
     }
     // C. Legacy Cubes
