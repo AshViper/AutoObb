@@ -211,12 +211,42 @@
             reader.onload = function(e) {
                 try {
                     const json = JSON.parse(e.target.result);
-                    const loader = new THREE.BufferGeometryLoader();
-                    const geometry = loader.parse(json);
+                    console.log("Loaded JSON:", json);
                     
+                    let geometry = null;
+
+                    // Strategy Pattern for loading
+                    if (json.type === 'BufferGeometry' && json.data) {
+                        // Standard Three.js BufferGeometry export
+                        console.log("Detected Standard Three.js BufferGeometry");
+                        const loader = new THREE.BufferGeometryLoader();
+                        geometry = loader.parse(json);
+                    } 
+                    else if (json.attributes) {
+                        // Raw attributes object (sometimes passed directly)
+                        console.log("Detected Raw Attributes");
+                        const loader = new THREE.BufferGeometryLoader();
+                        geometry = loader.parse({ data: json });
+                    }
+                    else if (json['minecraft:geometry'] || json.format_version) {
+                        // Minecraft Bedrock Geometry
+                        console.log("Detected Minecraft Bedrock Geometry");
+                        geometry = parseMinecraftGeometry(json);
+                    }
+                    else if (json.data && json.data.attributes) {
+                         // Some other variant
+                         const loader = new THREE.BufferGeometryLoader();
+                         geometry = loader.parse(json);
+                    }
+                    else {
+                        throw new Error("Unknown JSON format. Please ensure it is a Three.js BufferGeometry or Minecraft .geo.json");
+                    }
+                    
+                    if (!geometry) throw new Error("Failed to create geometry");
+
                     if (modelMesh) {
                         scene.remove(modelMesh);
-                        modelMesh.geometry.dispose();
+                        if (modelMesh.geometry) modelMesh.geometry.dispose();
                     }
 
                     // Center Geometry
@@ -225,7 +255,7 @@
 
                     const material = new THREE.MeshStandardMaterial({ 
                         color: 0xaaaaaa, 
-                        wireframe: false,
+                        // wireframe: false, // Solid is better for visualization
                         transparent: true,
                         opacity: 0.8,
                         side: THREE.DoubleSide
@@ -239,13 +269,130 @@
                     const wireMesh = new THREE.Mesh(geometry, wireMat);
                     modelMesh.add(wireMesh);
 
-                    console.log("Model loaded", json);
+                    console.log("Model loaded successfully");
                 } catch (err) {
-                    alert("Error loading JSON: " + err);
+                    alert("Error loading JSON: " + err.message);
                     console.error(err);
                 }
             };
             reader.readAsText(file);
+        }
+
+        function parseMinecraftGeometry(json) {
+            // Find the geometry array
+            const geos = json['minecraft:geometry'];
+            if (!Array.isArray(geos) || geos.length === 0) {
+                 throw new Error("No minecraft:geometry data found.");
+            }
+            // Use the first geometry model found
+            const modelData = geos[0];
+            const bones = modelData.bones;
+            
+            if (!bones) throw new Error("No bones found in Minecraft geometry.");
+
+            // We need to merge all cubes into one BufferGeometry
+            const geometries = [];
+
+            bones.forEach(bone => {
+                if (bone.cubes) {
+                    bone.cubes.forEach(cube => {
+                        // Minecraft coords: x is right, y is up, z is forward? 
+                        // Actually standard MC is: +x East, +y Up, +z South.
+                        // Origin is usually the bottom-north-west corner of the cube.
+                        // Pivot is the center of rotation for the bone.
+                        
+                        // We will just create boxes and place them. 
+                        // Note: Hierarchical transforms (bone parenting) might be complex to fully reconstruct flattened.
+                        // For OBB cloud fitting, we just need the point cloud mostly correct.
+                        // Let's assume absolute coordinates or simplified structure for now.
+                        // If 'parent' exists, positions are relative. This is tricky.
+                        // BUT, to get a "point cloud" for OBB, we just need rough shape.
+                        
+                        const size = cube.size || [0,0,0];
+                        const origin = cube.origin || [0,0,0];
+                        const rot = cube.rotation || [0,0,0]; 
+                        // Rotation in MC is usually around the pivot, but for cubes inside bones it can be tricky.
+                        // Simplification: Create box at world coords (ignoring bone hierarchy for now or assuming pre-flattened)
+                        // Note: Often 'origin' in MC geometry is absolute if bones are at 0,0,0? No, usually relative to parent.
+                        // To do this strictly correctly requires a scene graph. 
+                        // HOWEVER, many tool exports provided as "geo.json" for these tasks are single-level or simple.
+                        
+                        const w = size[0];
+                        const h = size[1];
+                        const d = size[2];
+                        if (w===0 && h===0 && d===0) return;
+
+                        const boxGeo = new THREE.BoxGeometry(w, h, d);
+                        
+                        // MC Origin is the corner (min-x, min-y, min-z). THREE Box is centered.
+                        // Center of box:
+                        const cx = origin[0] + w/2;
+                        const cy = origin[1] + h/2;
+                        const cz = origin[2] + d/2;
+
+                        boxGeo.translate(cx, cy, cz);
+                        
+                        // Simple individual cube rotation (if present on the cube itself)
+                        // Cube rotation is relative to 'pivot' if defined in the cube, else origin?
+                        if (cube.pivot) {
+                             // Rotate around pivot
+                             // Translate to pivot -> 0, Rotate, Translate back
+                             boxGeo.translate(-cube.pivot[0], -cube.pivot[1], -cube.pivot[2]);
+                             
+                             const rx = THREE.MathUtils.degToRad(rot[0]);
+                             const ry = THREE.MathUtils.degToRad(rot[1]);
+                             const rz = THREE.MathUtils.degToRad(rot[2]);
+                             
+                             // Euler order? MC usually varies. XYZ is common.
+                             boxGeo.rotateX(rx);
+                             boxGeo.rotateY(ry);
+                             boxGeo.rotateZ(rz);
+
+                             boxGeo.translate(cube.pivot[0], cube.pivot[1], cube.pivot[2]);
+                        } else if (rot.some(x=>x!==0)) {
+                             // Rotation without explicit pivot usually implies pivot at origin (rare in MC) or local center?
+                             // Let's ignore complex bone hierarchy rotation for the "Point Cloud" step unless critical.
+                             // Just this simple parsing captures the bulk geometry.
+                        }
+
+                        geometries.push(boxGeo);
+                    });
+                }
+            });
+
+            if (geometries.length === 0) throw new Error("No cubes found in geometry.");
+            
+            // Merge all boxes
+            // Use BufferGeometryUtils if available, or just manually merge positions
+            // Since we can't easily import BufferGeometryUtils from the CDN without proper setup (it's in examples/jsm/utils),
+            // and we are using module imports in the main script... 
+            // We can try to import it at top level? 
+            // The user's code only imports core Three and Controls.
+            // Let's do a naive merge of position attributes since we mainly need points.
+            
+            // Simplest manual merge for positions only (we just need the shape for OBB)
+            // But we actually want to render it too.
+            
+            // Let's dynamically import BufferGeometryUtils inside the main module or use an alternative
+            // Manual merge:
+            let totalVertices = 0;
+            geometries.forEach(g => totalVertices += g.attributes.position.count);
+            
+            const positionArray = new Float32Array(totalVertices * 3);
+            let offset = 0;
+            
+            geometries.forEach(g => {
+                const arr = g.attributes.position.array;
+                const count = g.attributes.position.count;
+                // Apply transformations? The geometries themselves were translated.
+                // BoxGeometry.translate/rotate works on the position attribute in place. Good.
+                positionArray.set(arr, offset * 3);
+                offset += count;
+            });
+            
+            const mergedGeo = new THREE.BufferGeometry();
+            mergedGeo.setAttribute('position', new THREE.BufferAttribute(positionArray, 3));
+            return mergedGeo;
         }
 
         // --- Selection Logic ---
